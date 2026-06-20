@@ -1,0 +1,4 @@
+new x
+set x 123
+multiply x 2
+print x
