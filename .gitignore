@@ -39,6 +39,8 @@ interpreter
 *.exe
 *.out
 *.app
+exampleCode
+compiler
 
 # Build directories
 build/
@@ -59,6 +61,8 @@ compile_commands.json
 *.bak
 *.swp
 exampleCode.txt
+exampleCode.S
+exampleCode.o
 
 # vcpkg
 vcpkg_installed/
