@@ -181,7 +181,7 @@ get_string_length_done:
 )";
                 _assemblyCode.addInstructionToFunctions(getStringLengthAssemblyCode);
             }
-            if (source.find("print") != std::string::npos) {
+            if (source.find("print ") != std::string::npos) {
                 const std::string itoaAssemblyCode = R"(
 itoa:
     testq %rax, %rax
