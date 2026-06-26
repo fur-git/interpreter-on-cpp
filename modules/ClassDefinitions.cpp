@@ -83,7 +83,12 @@ class Compiler {
             IF,
             ELSE,
             READ,
-            INVALID
+            INVALID,
+            INFO,
+            WARNING,
+            ERROR,
+            DEBUG,
+            PRINTSTRING,
         };
         struct ConditionalMetadata {
             uint16_t labelId;
@@ -94,8 +99,10 @@ class Compiler {
         std::string _filename;
         bool _is64Bits;
         uint16_t _labelCounter;
+        uint16_t _variableCounter;
         std::vector<ConditionalMetadata> _conditionalMetadataStack;
         InstructionType getInstructionType(const std::string& instruction) {
+            if (instruction.find("printString") != std::string::npos) return InstructionType::PRINTSTRING;
             if (instruction.find("print") != std::string::npos) return InstructionType::PRINT;
             if (instruction.find("newline") != std::string::npos) return InstructionType::NEWLINE;
             if (instruction.find("new") != std::string::npos) return InstructionType::NEW;
@@ -109,6 +116,10 @@ class Compiler {
             if (instruction.find("else") != std::string::npos) return InstructionType::ELSE;
             if (instruction.find("if") != std::string::npos) return InstructionType::IF;
             if (instruction.find("read") != std::string::npos) return InstructionType::READ;
+            if (instruction.find("info") != std::string::npos) return InstructionType::INFO;
+            if (instruction.find("warning") != std::string::npos) return InstructionType::WARNING;
+            if (instruction.find("error") != std::string::npos) return InstructionType::ERROR;
+            if (instruction.find("debug") != std::string::npos) return InstructionType::DEBUG;
             return InstructionType::INVALID;
         }
         bool doesTheVariableExist(const std::string& variableName) {
@@ -116,15 +127,17 @@ class Compiler {
         }
     public:
         bool _errorFlag;
-        static void reportError(const std::string& message) { std::cerr << "Error: " << message << std::endl; }
-        static void reportWarning(const std::string& message) { std::cerr << "Warning: " << message << std::endl; }
-        static void reportInfo(const std::string& message) { std::cout << "Info: " << message << std::endl; }
+        static void reportError(const std::string& message) { std::cerr << "ERROR: " << message << std::endl; }
+        static void reportWarning(const std::string& message) { std::cerr << "WARNING: " << message << std::endl; }
+        static void reportInfo(const std::string& message) { std::cout << "INFO: " << message << std::endl; }
+        static void reportDebug(const std::string& message) { std::cout << "DEBUG: " << message << std::endl; }
         Compiler(const std::string& filename, bool is64Bits) : _assemblyCode(filename) {
             _filename = filename;
             _sourceCodeFile.open(filename);
             _errorFlag = false;
             _is64Bits = is64Bits;
             _labelCounter = 0;
+            _variableCounter = 0;
             if (!_sourceCodeFile.is_open()) {
                 reportError("Failed to open source code file: " + filename);
                 return;
@@ -146,6 +159,27 @@ class Compiler {
             if (source.find("read") != std::string::npos || source.find("print") != std::string::npos) {
                 const std::string readPrintAssemblyCode = "buffer: .zero 33\n";
                 _assemblyCode.addInstructionToBss(readPrintAssemblyCode);
+            }
+            if (source.find("info") != std::string::npos ||
+                source.find("warning") != std::string::npos ||
+                source.find("error") != std::string::npos ||
+                source.find("debug") != std::string::npos ||
+                source.find("print") != std::string::npos ||
+                source.find("printString") != std::string::npos) {
+                const std::string getStringLengthAssemblyCode = R"(
+get_string_length:
+    xorq %rcx, %rcx
+get_string_length_loop:
+    cmpb $0, (%rax)
+    je get_string_length_done
+    incq %rcx
+    incq %rax
+    jmp get_string_length_loop
+get_string_length_done:
+    ret
+
+)";
+                _assemblyCode.addInstructionToFunctions(getStringLengthAssemblyCode);
             }
             if (source.find("print") != std::string::npos) {
                 const std::string itoaAssemblyCode = R"(
@@ -190,17 +224,6 @@ itoa_emit_loop:
     movb %dl, (%rcx)
     testq %rax, %rax
     jnz itoa_emit_loop
-    ret
-
-get_string_length:
-    xorq %rcx, %rcx
-get_string_length_loop:
-    cmpb $0, (%rax)
-    je get_string_length_done
-    incq %rcx
-    incq %rax
-    jmp get_string_length_loop
-get_string_length_done:
     ret
 
 )";
@@ -598,6 +621,171 @@ atoi_positive:
 )", tokens[1]);
                             }
                             _assemblyCode.addInstructionToText(assemblyInstruction);
+                            break;
+                        case InstructionType::INFO:
+                            if (tokens.size() == 1) {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            assemblyInstruction = std::format(R"(
+    info_{}: .asciz "INFO: )", _variableCounter);
+                            _assemblyCode.addInstructionToData(assemblyInstruction);
+                            for (uint16_t i = 0; i < tokens.size(); i++) {
+                                if (tokens[i] != "info" && i != tokens.size() - 1) {
+                                    assemblyInstruction = std::format("{} ", tokens[i]);
+                                    _assemblyCode.addInstructionToData(assemblyInstruction);
+                                }
+                                else if (i == tokens.size() - 1) {
+                                    assemblyInstruction = std::format("{}\\n", tokens[i]);
+                                    _assemblyCode.addInstructionToData(assemblyInstruction);
+                                }
+                            }
+                            assemblyInstruction = "\"\n";
+                            _assemblyCode.addInstructionToData(assemblyInstruction);
+                            assemblyInstruction = std::format(R"(
+    leaq info_{}(%rip), %rax
+    call get_string_length
+    movq %rcx, %rdx
+    movq $1, %rax
+    movq $1, %rdi
+    leaq info_{}(%rip), %rsi
+    syscall
+)", _variableCounter, _variableCounter);
+                            _assemblyCode.addInstructionToText(assemblyInstruction);
+                            _variableCounter++;
+                            break;
+                        case InstructionType::WARNING:
+                            if (tokens.size() == 1) {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            assemblyInstruction = std::format(R"(
+    warning_{}: .asciz "WARNING: )", _variableCounter);
+                            _assemblyCode.addInstructionToData(assemblyInstruction);
+                            for (uint16_t i = 0; i < tokens.size(); i++) {
+                                if (tokens[i] != "warning" && i != tokens.size() - 1) {
+                                    assemblyInstruction = std::format("{} ", tokens[i]);
+                                    _assemblyCode.addInstructionToData(assemblyInstruction);
+                                }
+                                else if (i == tokens.size() - 1) {
+                                    assemblyInstruction = std::format("{}\\n", tokens[i]);
+                                    _assemblyCode.addInstructionToData(assemblyInstruction);
+                                }
+                            }
+                            assemblyInstruction = "\"\n";
+                            _assemblyCode.addInstructionToData(assemblyInstruction);
+                            assemblyInstruction = std::format(R"(
+    leaq warning_{}(%rip), %rax
+    call get_string_length
+    movq %rcx, %rdx
+    movq $1, %rax
+    movq $1, %rdi
+    leaq warning_{}(%rip), %rsi
+    syscall
+)", _variableCounter, _variableCounter);
+                            _assemblyCode.addInstructionToText(assemblyInstruction);
+                            _variableCounter++;
+                            break;
+                        case InstructionType::ERROR:
+                            if (tokens.size() == 1) {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            assemblyInstruction = std::format(R"(
+    error_{}: .asciz "ERROR: )", _variableCounter);
+                            _assemblyCode.addInstructionToData(assemblyInstruction);
+                            for (uint16_t i = 0; i < tokens.size(); i++) {
+                                if (tokens[i] != "error" && i != tokens.size() - 1) {
+                                    assemblyInstruction = std::format("{} ", tokens[i]);
+                                    _assemblyCode.addInstructionToData(assemblyInstruction);
+                                }
+                                else if (i == tokens.size() - 1) {
+                                    assemblyInstruction = std::format("{}\\n", tokens[i]);
+                                    _assemblyCode.addInstructionToData(assemblyInstruction);
+                                }
+                            }
+                            assemblyInstruction = "\"\n";
+                            _assemblyCode.addInstructionToData(assemblyInstruction);
+                            assemblyInstruction = std::format(R"(
+    leaq error_{}(%rip), %rax
+    call get_string_length
+    movq %rcx, %rdx
+    movq $1, %rax
+    movq $1, %rdi
+    leaq error_{}(%rip), %rsi
+    syscall
+)", _variableCounter, _variableCounter);
+                            _assemblyCode.addInstructionToText(assemblyInstruction);
+                            _variableCounter++;
+                            break;
+                        case InstructionType::DEBUG:
+                            if (tokens.size() == 1) {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            assemblyInstruction = std::format(R"(
+    debug_{}: .asciz "DEBUG: )", _variableCounter);
+                            _assemblyCode.addInstructionToData(assemblyInstruction);
+                            for (uint16_t i = 0; i < tokens.size(); i++) {
+                                if (tokens[i] != "debug" && i != tokens.size() - 1) {
+                                    assemblyInstruction = std::format("{} ", tokens[i]);
+                                    _assemblyCode.addInstructionToData(assemblyInstruction);
+                                }
+                                else if (i == tokens.size() - 1) {
+                                    assemblyInstruction = std::format("{}\\n", tokens[i]);
+                                    _assemblyCode.addInstructionToData(assemblyInstruction);
+                                }
+                            }
+                            assemblyInstruction = "\"\n";
+                            _assemblyCode.addInstructionToData(assemblyInstruction);
+                            assemblyInstruction = std::format(R"(
+    leaq debug_{}(%rip), %rax
+    call get_string_length
+    movq %rcx, %rdx
+    movq $1, %rax
+    movq $1, %rdi
+    leaq debug_{}(%rip), %rsi
+    syscall
+)", _variableCounter, _variableCounter);
+                            _assemblyCode.addInstructionToText(assemblyInstruction);
+                            _variableCounter++;
+                            break;
+                        case InstructionType::PRINTSTRING:
+                            if (tokens.size() == 1) {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            assemblyInstruction = std::format(R"(
+    string_{}: .asciz ")", _variableCounter);
+                            _assemblyCode.addInstructionToData(assemblyInstruction);
+                            for (uint16_t i = 0; i < tokens.size(); i++) {
+                                if (tokens[i] != "printString" && i != tokens.size() - 1) {
+                                    assemblyInstruction = std::format("{} ", tokens[i]);
+                                    _assemblyCode.addInstructionToData(assemblyInstruction);
+                                }
+                                else if (i == tokens.size() - 1) {
+                                    assemblyInstruction = std::format("{}", tokens[i]);
+                                    _assemblyCode.addInstructionToData(assemblyInstruction);
+                                }
+                            }
+                            assemblyInstruction = "\"\n";
+                            _assemblyCode.addInstructionToData(assemblyInstruction);
+                            assemblyInstruction = std::format(R"(
+    leaq string_{}(%rip), %rax
+    call get_string_length
+    movq %rcx, %rdx
+    movq $1, %rax
+    movq $1, %rdi
+    leaq string_{}(%rip), %rsi
+    syscall
+)", _variableCounter, _variableCounter);
+                            _assemblyCode.addInstructionToText(assemblyInstruction);
+                            _variableCounter++;
                             break;
                         case InstructionType::INVALID:
                             reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));

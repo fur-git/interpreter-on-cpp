@@ -19,6 +19,9 @@ source.txt  -->  compiler  -->  source.S  -->  as  -->  source.o  -->  ld  -->  
 - Integer printing is handled by a generated `itoa` routine; reading integers
   from standard input is handled by a generated `atoi` routine. These helpers
   are only emitted when the program actually uses `print` / `read`.
+- Labeled text output (`info`, `warning`, `error`, `debug`) and plain text output
+  (`printString`) use a generated `get_string_length` routine. It is emitted when
+  the program uses any of those instructions or `print`.
 - The program entry point is `_start`, and execution ends with the Linux
   `exit` syscall.
 
@@ -77,6 +80,7 @@ ignored. There are no comments.
 | `set` | `set X N` | Assign integer literal `N` to `X`. |
 | `read` | `read X` | Read an integer from standard input into `X`. |
 | `print` | `print X` | Print `X` to standard output as a decimal number. |
+| `printString` | `printString message…` | Print a plain text message to standard output (no prefix or trailing newline). |
 | `newline` | `newline` | Print a single newline character. |
 | `add` | `add X Y` | `X = X + Y`. |
 | `subtract` | `subtract X Y` | `X = X - Y`. |
@@ -86,6 +90,10 @@ ignored. There are no comments.
 | `else` | `else` | Begin the block that runs only when the matching `if` condition was false. Optional. |
 | `done` | `done` | Close the most recently opened `if` block. |
 | `exit` | `exit X` | Terminate the program with exit code `X`. |
+| `info` | `info message…` | Print an informational line to standard output: `INFO: message…`. |
+| `warning` | `warning message…` | Print a warning line to standard output: `WARNING: message…`. |
+| `error` | `error message…` | Print an error line to standard output: `ERROR: message…`. |
+| `debug` | `debug message…` | Print a debug line to standard output: `DEBUG: message…`. |
 
 ### Variables
 
@@ -122,6 +130,66 @@ read value      # type a number and press Enter
 print value     # prints it back
 newline
 ```
+
+### Plain text output
+
+The `printString` instruction prints a raw text message to standard output. It
+takes one or more words after the keyword; those words are written exactly as
+given, with spaces between them. Unlike `info` / `warning` / `error` / `debug`,
+there is no level prefix and no automatic newline at the end.
+
+```
+printString Hello World!
+newline
+```
+
+Running the program above prints:
+
+```
+Hello World!
+```
+
+Multi-word messages are supported:
+
+```
+printString value is ready
+newline
+```
+
+prints `value is ready` followed by a newline. At least one message word is
+required; a line with only `printString` is a compile error.
+
+### Logging messages
+
+The `info`, `warning`, `error`, and `debug` instructions print a labeled line of
+text to standard output. Each instruction takes one or more words after the
+keyword; those words become the message body. The compiler adds the level
+prefix and a trailing newline automatically.
+
+```
+info This is an info!
+warning This is a warning!
+error This is an error!
+debug This is a debug!
+```
+
+Running the program above prints:
+
+```
+INFO: This is an info!
+WARNING: This is a warning!
+ERROR: This is an error!
+DEBUG: This is a debug!
+```
+
+Multi-word messages are written as a single line:
+
+```
+info value is ready
+```
+
+prints `INFO: value is ready`. At least one message word is required; a line
+with only the keyword (for example `info` alone) is a compile error.
 
 ### Conditionals
 
@@ -212,7 +280,10 @@ few sharp edges worth knowing:
   that are substrings of others (or of keywords like `newline`) can collide.
   Prefer distinct, multi-character variable names.
 - **Instruction detection is keyword-substring-based.** Avoid variable names
-  that contain instruction keywords (`new`, `set`, `add`, `if`, `read`, etc.).
+  that contain instruction keywords (`new`, `set`, `add`, `if`, `read`,
+  `printString`, `info`, `warning`, `error`, `debug`, etc.). The compiler
+  checks longer keywords such as `printString` before shorter ones like `print`
+  that they contain.
 - **`read` uses a single shared buffer.** Reading multiple values from a pipe
   in one go can consume more than one number at once; interactive input (one
   number per line) is the most predictable.
