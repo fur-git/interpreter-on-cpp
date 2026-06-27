@@ -1,4 +1,4 @@
-#include "modules/ClassDefinitions.cpp"
+#include "modules/Compiler.cpp"
 
 int main(int argc, char* argv[]) {
     bool clearObjectFiles = false;

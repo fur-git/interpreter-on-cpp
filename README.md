@@ -28,10 +28,12 @@ source.txt  -->  compiler  -->  source.S  -->  as  -->  source.o  -->  ld  -->  
 - User-defined **functions** are emitted into a separate `.text` section and
   invoked with `execute`. The main program body and function bodies share the
   same global variables.
-- **Compile-time messages** (`compileTimeInfo`, `compileTimeWarning`,
-  `compileTimeError`, `compileTimeDebug`) print diagnostic output while the
-  compiler is running. They emit no assembly and are useful for finding where
-  compilation stopped when something goes wrong.
+- **Compile-time directives** (`#macro`, `#if` / `#done`, and `#compileTimeInfo`,
+  `#compileTimeWarning`, `#compileTimeError`, `#compileTimeDebug`) are handled
+  entirely during compilation. They emit no assembly.
+- **Marks and jumps** (`mark`, `go to`) let the main program jump to named
+  positions. Together with `if` / `done`, they are enough to build loops
+  manually.
 - The program entry point is `_start`, and execution ends with the Linux
   `exit` syscall.
 
@@ -87,7 +89,7 @@ ignored. There are no comments.
 | Instruction | Form | Meaning |
 | --- | --- | --- |
 | `new` | `new X` | Declare integer variable `X`, initialized to `0`. |
-| `set` | `set X N` | Assign integer literal `N` to `X`. |
+| `set` | `set X to be N` | Assign integer literal `N` (or a macro name) to `X`. |
 | `read` | `read X` | Read an integer from standard input into `X`. |
 | `print` | `print X` | Print `X` to standard output as a decimal number. |
 | `printString` | `printString message…` | Print a plain text message to standard output (no prefix or trailing newline). |
@@ -108,10 +110,15 @@ ignored. There are no comments.
 | `warning` | `warning message…` | Print a warning line to standard error: `WARNING: message…`. |
 | `error` | `error message…` | Print an error line to standard error: `ERROR: message…`. |
 | `debug` | `debug message…` | Print a debug line to standard output: `DEBUG: message…`. |
-| `compileTimeInfo` | `compileTimeInfo message…` | Print a compile-time info line to standard output. Emits no assembly. |
-| `compileTimeWarning` | `compileTimeWarning message…` | Print a compile-time warning line to standard error. Emits no assembly. |
-| `compileTimeError` | `compileTimeError message…` | Print a compile-time error line to standard error. Emits no assembly. |
-| `compileTimeDebug` | `compileTimeDebug message…` | Print a compile-time debug line to standard output. Emits no assembly. |
+| `#macro` | `#macro NAME is N` | Define a compile-time integer constant `NAME` with numeric value `N`. |
+| `#if` | `#if A equals to B then do` | Begin a compile-time conditional block. Both operands must be macro names. |
+| `#done` | `#done` | Close the most recently opened `#if` block. |
+| `#compileTimeInfo` | `#compileTimeInfo message…` | Print a compile-time info line to standard output. Emits no assembly. |
+| `#compileTimeWarning` | `#compileTimeWarning message…` | Print a compile-time warning line to standard error. Emits no assembly. |
+| `#compileTimeError` | `#compileTimeError message…` | Print a compile-time error line to standard error. Emits no assembly. |
+| `#compileTimeDebug` | `#compileTimeDebug message…` | Print a compile-time debug line to standard output. Emits no assembly. |
+| `mark` | `mark NAME` | Define a named jump target in the main program. |
+| `go to` | `go to NAME` | Jump unconditionally to a previously defined mark. |
 
 ### Variables
 
@@ -119,7 +126,7 @@ Declare a variable before using it:
 
 ```
 new counter
-set counter 10
+set counter to be 10
 ```
 
 Variables are global and live for the whole program. Re-declaring an existing
@@ -134,8 +141,8 @@ into the first operand:
 ```
 new total
 new amount
-set total 100
-set amount 25
+set total to be 100
+set amount to be 25
 add total amount        # total = 125
 subtract total amount   # total = 100
 multiply total amount   # total = 2500
@@ -233,8 +240,8 @@ Conditionals can be **nested**.
 ```
 new left
 new right
-set left 5
-set right 5
+set left to be 5
+set right to be 5
 
 if left equals to right then do
   print left
@@ -250,8 +257,8 @@ between the `if` and its matching `done`:
 ```
 new left
 new right
-set left 3
-set right 4
+set left to be 3
+set right to be 4
 
 if left equals to right then do
   print left
@@ -264,6 +271,101 @@ done
 
 When `left == right`, only the `then` block runs; otherwise only the `else`
 block runs. Each `if` may have at most one `else do`.
+
+### Marks and jumps
+
+`mark` and `go to` provide unstructured control flow in the **main program
+only**. They compile to an assembly label and an unconditional `jmp`.
+
+```
+mark loop
+printString Hello
+newline
+go to loop
+```
+
+Rules:
+
+- Marks may only appear in the main program body, not inside functions.
+- `go to` may only appear in the main program body as well.
+- Each mark name must be unique across the whole source file.
+- A mark must be defined **before** any `go to` that targets it (the compiler
+  reads the file in a single pass).
+- A mark name cannot be reused and should not match a function name (both become
+  assembly labels).
+
+Together with `if` / `else do` / `done`, marks and jumps are enough to build
+loops manually, the same way `while` and `for` are usually lowered to labels,
+branches, and backward jumps in other languages.
+
+**Infinite loop:**
+
+```
+mark loop
+printString tick
+newline
+go to loop
+```
+
+**While-style loop** (`keep running while X equals Y`):
+
+```
+new X
+new Y
+new one
+set X to be 0
+set Y to be 5
+set one to be 1
+
+mark whileLoop
+if X equals to Y then do
+    go to whileEnd
+done
+print X
+add X one
+go to whileLoop
+mark whileEnd
+```
+
+Because `if` only supports `equals to`, richer comparisons still need workarounds
+until more operators are added.
+
+### Macros and compile-time conditionals
+
+Macros are integer constants resolved while the compiler is running. Define
+them with `#macro`:
+
+```
+#macro TRUE is 1
+#macro FALSE is 0
+#macro LIMIT is 10
+```
+
+Rules:
+
+- Macro names follow the same naming rules as variables and functions.
+- A macro value must be a numeric literal.
+- Macros can be used anywhere a literal is accepted in `set X to be N` — the
+  compiler substitutes the numeric value before generating assembly.
+
+Compile-time conditionals use macro names instead of variables:
+
+```
+#macro FEATURE is 1
+#macro ENABLED is 1
+
+#if FEATURE equals to ENABLED then do
+    new enabledFeature
+#done
+```
+
+If the condition is false, every line until the matching `#done` is skipped
+during compilation (no variables are declared, no assembly is emitted). The form
+is exactly seven tokens, same shape as runtime `if`: `#if`, left macro,
+`equals`, `to`, right macro, `then`, `do`.
+
+Runtime `done` closes runtime `if` blocks. Compile-time `#done` closes `#if`
+blocks. Do not mix them.
 
 ### Functions
 
@@ -298,7 +400,8 @@ Rules:
 - `execute NAME` emits a `call` to the function. The function must already be
   defined earlier in the source file.
 - Any instruction that can appear in the main program (including `if`, `exit`,
-  `print`, and so on) can appear inside a function body.
+  `print`, and so on) can appear inside a function body, **except** `mark` and
+  `go to`.
 
 ### No-op (`nothing`)
 
@@ -312,18 +415,18 @@ nothing
 
 ### Compile-time debugging
 
-The four `compileTime*` instructions print messages **while the compiler is
+The four `#compileTime*` directives print messages **while the compiler is
 running**, not when the compiled program executes. They emit no assembly and are
 meant to help you find where compilation stopped when something goes wrong.
 
 Write them through your source as checkpoints:
 
 ```
-compileTimeInfo checkpoint 1 start
+#compileTimeInfo checkpoint 1 start
 new x
-compileTimeInfo checkpoint 2 ok
-set x 10
-compileTimeInfo checkpoint 3 ok
+#compileTimeInfo checkpoint 2 ok
+set x to be 10
+#compileTimeInfo checkpoint 3 ok
 ```
 
 When compilation fails, every checkpoint printed before the error shows how far
@@ -333,27 +436,27 @@ if that code would not run at execution time.
 
 | Instruction | Output stream | Prefix |
 | --- | --- | --- |
-| `compileTimeInfo` | standard output | `INFO: CompileTime Info: …` |
-| `compileTimeWarning` | standard error | `WARNING: CompileTime Warning: …` |
-| `compileTimeError` | standard error | `ERROR: CompileTime Error: …` |
-| `compileTimeDebug` | standard output | `DEBUG: CompileTime Debug: …` |
+| `#compileTimeInfo` | standard output | `INFO: CompileTime Info: …` |
+| `#compileTimeWarning` | standard error | `WARNING: CompileTime Warning: …` |
+| `#compileTimeError` | standard error | `ERROR: CompileTime Error: …` |
+| `#compileTimeDebug` | standard output | `DEBUG: CompileTime Debug: …` |
 
 Each instruction requires at least one message word after the keyword, same as
 the runtime `info` / `warning` / `error` / `debug` instructions.
 
 **Important:** instruction detection uses keyword substring matching on the
-**entire line**. Because `compileTime*` keywords are checked after many other
+**entire line**. Because `#compileTime*` keywords are checked after many other
 keywords, a compile-time message that contains words like `new`, `set`, `add`,
 `done`, `if`, or `print` anywhere in the text can be misclassified as a
 different instruction. Keep checkpoint messages free of instruction keywords, or
-use neutral wording (for example `compileTimeInfo checkpoint 2 ok` instead of
-`compileTimeInfo checkpoint 2 after new x`).
+use neutral wording (for example `#compileTimeInfo checkpoint 2 ok` instead of
+`#compileTimeInfo checkpoint 2 after new x`).
 
 ### Exiting
 
 ```
 new code
-set code 0
+set code to be 0
 exit code
 ```
 
@@ -363,15 +466,36 @@ present in the source).
 
 ## Example program
 
-`exampleCode.txt` demonstrates variables, a function, conditionals, and I/O:
+`exampleCode.txt` demonstrates a simple infinite loop with `mark` and `go to`:
 
 ```
+mark loop
+printString 67
+go to loop
+```
+
+Build and run:
+
+```bash
+./compiler exampleCode.txt
+./exampleCode
+```
+
+The program prints `67` forever until you stop it.
+
+### More complete example
+
+A fuller program combining macros, functions, conditionals, and I/O:
+
+```
+#macro MAX is 100
+
 new x
 new y
 
 function calculate does
     new temp
-    set temp 100
+    set temp to be MAX
     add x y
     if x equals to temp then do
         printString The result equals to 100!
@@ -388,13 +512,6 @@ print x
 newline
 ```
 
-Build and run:
-
-```bash
-./compiler exampleCode.txt
-./exampleCode
-```
-
 ## Notes and limitations
 
 This is a teaching project, so the language is intentionally minimal and has a
@@ -407,11 +524,12 @@ few sharp edges worth knowing:
   longer cause false "already exists" or "does not exist" errors.
 - **Instruction detection is keyword-substring-based.** Avoid variable and
   function names that contain instruction keywords (`new`, `set`, `add`, `if`,
-  `read`, `printString`, `function`, `execute`, `fdone`, `nothing`,
-  `compileTimeInfo`, `info`, `warning`, `error`, `debug`, etc.). The compiler
-  checks longer keywords such as `printString` and `compileTimeInfo` before
-  shorter ones like `print` and `info` that they contain. The same rule applies
-  to text in `compileTime*` messages — see [Compile-time debugging](#compile-time-debugging).
+  `read`, `printString`, `function`, `execute`, `fdone`, `nothing`, `mark`,
+  `go to`, `#macro`, `#compileTimeInfo`, `info`, `warning`, `error`, `debug`,
+  etc.). The compiler checks longer keywords such as `printString` and
+  `#compileTimeInfo` before shorter ones like `print` and `info` that they
+  contain. The same rule applies to text in `#compileTime*` messages — see
+  [Compile-time debugging](#compile-time-debugging).
 - **Arithmetic checks only the first operand.** Instructions like `add X Y`
   verify that `X` exists but not `Y`. A typo in `Y` may pass compilation and
   fail at assembly or link time instead.
@@ -422,9 +540,15 @@ few sharp edges worth knowing:
   number per line) is the most predictable.
 - **No numeric validation.** Non-numeric input parses as `0` or stops at the
   first non-digit; very large values can overflow without warning.
-- **Only `equals to` is supported** as a comparison in `if`.
+- **Only `equals to` is supported** as a comparison in runtime `if` and
+  compile-time `#if`.
 - **`if` lines must be exactly** `if X equals to Y then do` and may contain at
   most one `else do` block.
-- **Unclosed blocks are compile errors.** An `if` without a matching `done`, or
-  a `function` without a matching `fdone`, is rejected after the full source
-  file has been read.
+- **`mark` and `go to` are main-program only.** They cannot appear inside
+  function bodies. Jumping into or out of a function would break the call/return
+  stack, so the compiler rejects them there.
+- **Marks must be defined before use.** There is no forward-reference pass; a
+  `go to` target must already have been seen earlier in the source file.
+- **Unclosed blocks are compile errors.** An `if` without a matching `done`, a
+  `#if` without a matching `#done`, or a `function` without a matching `fdone`,
+  is rejected after the full source file has been read.

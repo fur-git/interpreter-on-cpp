@@ -1,9 +1,8 @@
-#ifndef CLASS_DEFINITIONS_CPP
-#define CLASS_DEFINITIONS_CPP
+#ifndef COMPILER_CPP
+#define COMPILER_CPP
 
-#include <fstream>
-#include <iostream>
-#include <string>
+#include "AssemblyCode.cpp"
+
 #include <cstdint>
 #include <vector>
 #include <sstream>
@@ -11,62 +10,6 @@
 #include <cstdlib>
 #include <map>
 #include <set>
-
-class AssemblyCode {
-    private:
-        std::ofstream _assemblyCodeFile;
-        struct AssemblyTextSection {
-                std::string _assemblyTextSection;
-                AssemblyTextSection(const std::string& beginningOfSection) { _assemblyTextSection = beginningOfSection; }
-                void addInstruction(const std::string& instruction) { _assemblyTextSection += instruction; }
-                std::string getAssemblyTextSection(void) { return _assemblyTextSection; }
-        };
-        struct AssemblyDataSection {
-            std::string _assemblyDataSection;
-            AssemblyDataSection(const std::string& beginningOfSection) { _assemblyDataSection = beginningOfSection; }
-            void addInstruction(const std::string& instruction) { _assemblyDataSection += instruction; }
-            std::string getAssemblyDataSection(void) { return _assemblyDataSection; }
-        };
-        struct AssemblyBssSection {
-            std::string _assemblyBssSection;
-            AssemblyBssSection(const std::string& beginningOfSection) { _assemblyBssSection = beginningOfSection; }
-            void addInstruction(const std::string& instruction) { _assemblyBssSection += instruction; }
-            std::string getAssemblyBssSection(void) { return _assemblyBssSection; }
-        };
-        struct AssemblyFunctions {
-            std::string _assemblyFunctions;
-            AssemblyFunctions(const std::string& beginningOfSection) { _assemblyFunctions = beginningOfSection; }
-            void addInstruction(const std::string& instruction) { _assemblyFunctions += instruction; }
-            std::string getAssemblyFunctions(void) { return _assemblyFunctions; }
-        };
-        AssemblyTextSection _assemblyTextSection{".section .text\n.global _start\n\n_start:"};
-        AssemblyDataSection _assemblyDataSection{".section .data\n"};
-        AssemblyBssSection _assemblyBssSection{"\n.section .bss\n\n"};
-        AssemblyFunctions _assemblyFunctions{"\n.section .text\n"};
-    public:
-        AssemblyCode(const std::string& filename) {
-            _assemblyCodeFile.open(filename.substr(0, filename.find_last_of('.')) + ".S");
-        }
-        ~AssemblyCode(void) {
-            _assemblyCodeFile.close();
-        }
-        void addInstructionToText(const std::string& instruction) { _assemblyTextSection.addInstruction(instruction); }
-        void addInstructionToData(const std::string& instruction) { _assemblyDataSection.addInstruction(instruction); }
-        void addInstructionToBss(const std::string& instruction) { _assemblyBssSection.addInstruction(instruction); }
-        void addInstructionToFunctions(const std::string& instruction) { _assemblyFunctions.addInstruction(instruction); }
-        std::string getAssemblyTextSection(void) { return _assemblyTextSection.getAssemblyTextSection(); }
-        std::string getAssemblyDataSection(void) { return _assemblyDataSection.getAssemblyDataSection(); }
-        std::string getAssemblyBssSection(void) { return _assemblyBssSection.getAssemblyBssSection(); }
-        std::string getAssemblyFunctions(void) { return _assemblyFunctions.getAssemblyFunctions(); }
-        void writeToFile(void) {
-            _assemblyCodeFile
-            << _assemblyDataSection.getAssemblyDataSection()
-            << _assemblyBssSection.getAssemblyBssSection()
-            << _assemblyFunctions.getAssemblyFunctions()
-            << _assemblyTextSection.getAssemblyTextSection()
-            << std::endl; 
-        }
-};
 
 class Compiler {
     private:
@@ -98,6 +41,11 @@ class Compiler {
             COMPILETIMEWARNING,
             COMPILETIMEERROR,
             COMPILETIMEDEBUG,
+            COMPILETIMEIF,
+            COMPILETIMEDONE,
+            MACRO,
+            MARK,
+            GOTO,
         };
         struct ConditionalMetadata {
             uint16_t labelId;
@@ -112,11 +60,28 @@ class Compiler {
         uint16_t _functionCounter;
         uint16_t _conditionalCounter;
         bool _isInAFunction;
+        bool _isANumber;
+        bool _isSkippingCode;
+        bool _needsBuffer;
+        bool _needsGetStringLength;
+        bool _needsItoa;
+        bool _needsAtoi;
+        bool _needsNewline;
         std::vector<ConditionalMetadata> _conditionalMetadataStack;
         std::vector<uint16_t> _functionStack;
+        std::vector<uint16_t> _compileTimeIfStack;
+        std::map<std::string, std::string> _definedMacroVariables;
         std::set<std::string> _definedFunctions;
         std::set<std::string> _definedVariables;
+        std::set<std::string> _definedMarks;
         InstructionType getInstructionType(const std::string& instruction) {
+            if (instruction.find("#macro") != std::string::npos) return InstructionType::MACRO;
+            if (instruction.find("#compileTimeInfo") != std::string::npos) return InstructionType::COMPILETIMEINFO;
+            if (instruction.find("#compileTimeWarning") != std::string::npos) return InstructionType::COMPILETIMEWARNING;
+            if (instruction.find("#compileTimeError") != std::string::npos) return InstructionType::COMPILETIMEERROR;
+            if (instruction.find("#compileTimeDebug") != std::string::npos) return InstructionType::COMPILETIMEDEBUG;
+            if (instruction.find("#if") != std::string::npos) return InstructionType::COMPILETIMEIF;
+            if (instruction.find("#done") != std::string::npos) return InstructionType::COMPILETIMEDONE;
             if (instruction.find("function") != std::string::npos) return InstructionType::FUNCTION;
             if (instruction.find("fdone") != std::string::npos) return InstructionType::FDONE;
             if (instruction.find("execute") != std::string::npos) return InstructionType::EXECUTE;
@@ -134,15 +99,13 @@ class Compiler {
             if (instruction.find("else") != std::string::npos) return InstructionType::ELSE;
             if (instruction.find("if") != std::string::npos) return InstructionType::IF;
             if (instruction.find("read") != std::string::npos) return InstructionType::READ;
-            if (instruction.find("compileTimeInfo") != std::string::npos) return InstructionType::COMPILETIMEINFO;
-            if (instruction.find("compileTimeWarning") != std::string::npos) return InstructionType::COMPILETIMEWARNING;
-            if (instruction.find("compileTimeError") != std::string::npos) return InstructionType::COMPILETIMEERROR;
-            if (instruction.find("compileTimeDebug") != std::string::npos) return InstructionType::COMPILETIMEDEBUG;
             if (instruction.find("info") != std::string::npos) return InstructionType::INFO;
             if (instruction.find("warning") != std::string::npos) return InstructionType::WARNING;
             if (instruction.find("error") != std::string::npos) return InstructionType::ERROR;
             if (instruction.find("debug") != std::string::npos) return InstructionType::DEBUG;
             if (instruction.find("nothing") != std::string::npos) return InstructionType::NOTHING;
+            if (instruction.find("mark") != std::string::npos) return InstructionType::MARK;
+            if (instruction.find("go to") != std::string::npos) return InstructionType::GOTO;
             return InstructionType::INVALID;
         }
         bool doesTheVariableExist(const std::string& variableName) {
@@ -150,6 +113,17 @@ class Compiler {
         }
         bool doesTheFunctionExist(const std::string& functionName) {
             return _definedFunctions.contains(functionName);
+        }
+        bool doesTheMacroExist(const std::string& macroName) {
+            return _definedMacroVariables.contains(macroName);
+        }
+        bool isANumber(const std::string& string) {
+            for (const char& c : string) {
+                if (c < '0' || c > '9') {
+                    return false;
+                }
+            }
+            return true;
         }
     public:
         bool _errorFlag;
@@ -167,7 +141,17 @@ class Compiler {
             _functionCounter = 0;
             _conditionalCounter = 0;
             _isInAFunction = false;
+            _isSkippingCode = false;
+            _needsBuffer = false;
+            _needsGetStringLength = false;
+            _needsItoa = false;
+            _needsAtoi = false;
+            _needsNewline = false;
             _definedFunctions.clear();
+            _definedVariables.clear();
+            _definedMacroVariables.clear();
+            _compileTimeIfStack.clear();
+            _definedMarks.clear();
             if (!_sourceCodeFile.is_open()) {
                 reportError("Failed to open source code file: " + filename);
                 return;
@@ -178,129 +162,14 @@ class Compiler {
             _sourceCodeFile.close();
         }
         void compile(void) {
-            std::ostringstream sourceBuffer;
-            sourceBuffer << _sourceCodeFile.rdbuf();
-            std::string source = sourceBuffer.str();
-            _sourceCodeFile.clear();
-            _sourceCodeFile.seekg(0, std::ios::beg);
             uint32_t lineNumber = 0;
             std::string line;
-            if (source.find("read") != std::string::npos || source.find("print") != std::string::npos) {
-                const std::string readPrintAssemblyCode = "buffer: .zero 33\n";
-                _assemblyCode.addInstructionToBss(readPrintAssemblyCode);
-            }
-            if (source.find("info") != std::string::npos ||
-                source.find("warning") != std::string::npos ||
-                source.find("error") != std::string::npos ||
-                source.find("debug") != std::string::npos ||
-                source.find("print") != std::string::npos ||
-                source.find("printString") != std::string::npos) {
-                const std::string getStringLengthAssemblyCode = R"(
-RESERVED_get_string_BY_length_LANGUAGE:
-    xorq %rcx, %rcx
-RESERVED_get_string_BY_length_LANGUAGE_loop:
-    cmpb $0, (%rax)
-    je RESERVED_get_string_BY_length_LANGUAGE_done
-    incq %rcx
-    incq %rax
-    jmp RESERVED_get_string_BY_length_LANGUAGE_loop
-RESERVED_get_string_BY_length_LANGUAGE_done:
-    ret
-
-)";
-                _assemblyCode.addInstructionToFunctions(getStringLengthAssemblyCode);
-            }
-            if (source.find("print ") != std::string::npos) {
-                const std::string itoaAssemblyCode = R"(
-RESERVED_itoa_BY_LANGUAGE:
-    testq %rax, %rax
-    jne RESERVED_itoa_BY_LANGUAGE_not_zero
-    movb $'0', buffer(%rip)
-    movb $0, buffer+1(%rip)
-    ret
-RESERVED_itoa_BY_LANGUAGE_not_zero:
-    movq %rax, %r8
-    xorq %r10, %r10
-    testq %r8, %r8
-    jns RESERVED_itoa_BY_LANGUAGE_count
-    negq %r8
-    movq $1, %r10
-RESERVED_itoa_BY_LANGUAGE_count:
-    movq %r8, %rax
-    xorq %r9, %r9
-RESERVED_itoa_BY_LANGUAGE_count_loop:
-    incq %r9
-    xorq %rdx, %rdx
-    movq $10, %rdi
-    divq %rdi
-    testq %rax, %rax
-    jnz RESERVED_itoa_BY_LANGUAGE_count_loop
-    leaq buffer(%rip), %rcx
-    cmpq $0, %r10
-    je RESERVED_itoa_BY_LANGUAGE_sign_done
-    movb $'-', (%rcx)
-    incq %rcx
-RESERVED_itoa_BY_LANGUAGE_sign_done:
-    addq %r9, %rcx
-    movb $0, (%rcx)
-    movq %r8, %rax
-RESERVED_itoa_BY_LANGUAGE_emit_loop:
-    decq %rcx
-    xorq %rdx, %rdx
-    movq $10, %rdi
-    divq %rdi
-    addb $'0', %dl
-    movb %dl, (%rcx)
-    testq %rax, %rax
-    jnz RESERVED_itoa_BY_LANGUAGE_emit_loop
-    ret
-
-)";
-                _assemblyCode.addInstructionToFunctions(itoaAssemblyCode);
-            }
-            if (source.find("read") != std::string::npos) {
-                const std::string atoiAssemblyCode = R"(
-RESERVED_atoi_BY_LANGUAGE:
-    leaq buffer(%rip), %rsi
-    xorq %rax, %rax
-    xorq %r10, %r10
-    movb (%rsi), %cl
-    cmpb $'-', %cl
-    jne RESERVED_atoi_BY_LANGUAGE_loop
-    movq $1, %r10
-    incq %rsi
-RESERVED_atoi_BY_LANGUAGE_loop:
-    movzbq (%rsi), %rcx
-    cmpb $'0', %cl
-    jb RESERVED_atoi_BY_LANGUAGE_done
-    cmpb $'9', %cl
-    ja RESERVED_atoi_BY_LANGUAGE_done
-    subb $'0', %cl
-    imulq $10, %rax
-    addq %rcx, %rax
-    incq %rsi
-    jmp RESERVED_atoi_BY_LANGUAGE_loop
-RESERVED_atoi_BY_LANGUAGE_done:
-    cmpq $0, %r10
-    je RESERVED_atoi_BY_LANGUAGE_positive
-    negq %rax
-RESERVED_atoi_BY_LANGUAGE_positive:
-    ret
-
-)";
-                _assemblyCode.addInstructionToFunctions(atoiAssemblyCode);
-            }
-            if (source.find("newline") != std::string::npos) {
-                const std::string newlineAssemblyCode = R"(
-    newline: .ascii "\n"
-)";
-                _assemblyCode.addInstructionToData(newlineAssemblyCode);
-            }
             while (std::getline(_sourceCodeFile, line)) {
                 lineNumber++;
                 if (_errorFlag) { return; }
                 if (line.empty()) { continue; }
                 InstructionType instructionType = getInstructionType(line);
+                if (_isSkippingCode && instructionType != InstructionType::COMPILETIMEDONE) { continue; }
                 std::vector<std::string> tokens;
                 std::stringstream ss(line);
                 std::string token;
@@ -311,6 +180,9 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                     std::string endMessage;
                     switch (instructionType) {
                         case InstructionType::PRINT:
+                            _needsBuffer = true;
+                            _needsItoa = true;
+                            _needsGetStringLength = true;
                             if (tokens.size() != 2) {
                                 reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
                                 _errorFlag = true;
@@ -381,7 +253,7 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             _definedVariables.insert(tokens[1]);
                             break;
                         case InstructionType::SET:
-                            if (tokens.size() != 3) {
+                            if (tokens.size() != 5 || tokens[2] != "to" || tokens[3] != "be") {
                                 reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
                                 _errorFlag = true;
                                 continue;
@@ -391,14 +263,17 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                                 _errorFlag = true;
                                 continue;
                             }
+                            if (doesTheMacroExist(tokens[4])) {
+                                tokens[4] = _definedMacroVariables[tokens[4]];
+                            }
                             if (_is64Bits) {
                                 assemblyInstruction = std::format(R"(
     movq ${}, {}(%rip)
-)", tokens[2], tokens[1]);
+)", tokens[4], tokens[1]);
                             } else {
                                 assemblyInstruction = std::format(R"(
     movl ${}, {}(%rip)
-)", tokens[2], tokens[1]);
+)", tokens[4], tokens[1]);
                             }
                             if (_isInAFunction) {
                                 _assemblyCode.addInstructionToFunctions(assemblyInstruction);
@@ -529,6 +404,7 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             }
                             break;
                         case InstructionType::NEWLINE:
+                            _needsNewline = true;
                             if (tokens.size() != 1) {
                                 reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
                                 _errorFlag = true;
@@ -553,7 +429,7 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                                 _errorFlag = true;
                                 continue;
                             }
-                            if (!doesTheVariableExist(tokens[1])) {
+                            if (!doesTheVariableExist(tokens[1]) && !doesTheMacroExist(tokens[1])) {
                                 reportError("Variable " + tokens[1] + " does not exist");
                                 _errorFlag = true;
                                 continue;
@@ -674,6 +550,8 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             }
                             break;
                         case InstructionType::READ:
+                            _needsBuffer = true;
+                            _needsAtoi = true;
                             if (tokens.size() != 2) {
                                 reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
                                 _errorFlag = true;
@@ -712,6 +590,7 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             }
                             break;
                         case InstructionType::INFO:
+                            _needsGetStringLength = true;
                             if (tokens.size() == 1) {
                                 reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
                                 _errorFlag = true;
@@ -749,6 +628,7 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             _variableCounter++;
                             break;
                         case InstructionType::WARNING:
+                            _needsGetStringLength = true;
                             if (tokens.size() == 1) {
                                 reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
                                 _errorFlag = true;
@@ -786,6 +666,7 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             _variableCounter++;
                             break;
                         case InstructionType::ERROR:
+                            _needsGetStringLength = true;
                             if (tokens.size() == 1) {
                                 reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
                                 _errorFlag = true;
@@ -823,6 +704,7 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             _variableCounter++;
                             break;
                         case InstructionType::DEBUG:
+                            _needsGetStringLength = true;
                             if (tokens.size() == 1) {
                                 reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
                                 _errorFlag = true;
@@ -860,6 +742,7 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             _variableCounter++;
                             break;
                         case InstructionType::PRINTSTRING:
+                            _needsGetStringLength = true;
                             if (tokens.size() == 1) {
                                 reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
                                 _errorFlag = true;
@@ -987,14 +870,13 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             }
                             endMessage = "CompileTime Info: ";
                             for (uint16_t i = 0; i < tokens.size(); i++) {
-                                if (tokens[i] != "compileTimeInfo" && i != tokens.size() - 1) {
+                                if (tokens[i] != "#compileTimeInfo" && i != tokens.size() - 1) {
                                     endMessage += std::format("{} ", tokens[i]);
                                 }
                                 else if (i == tokens.size() - 1) {
                                     endMessage += std::format("{}", tokens[i]);
                                 }
                             }
-                            endMessage += "\n";
                             reportInfo(endMessage);
                             break;
                         case InstructionType::COMPILETIMEWARNING:
@@ -1005,14 +887,13 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             }
                             endMessage = "CompileTime Warning: ";
                             for (uint16_t i = 0; i < tokens.size(); i++) {
-                                if (tokens[i] != "compileTimeWarning" && i != tokens.size() - 1) {
+                                if (tokens[i] != "#compileTimeWarning" && i != tokens.size() - 1) {
                                     endMessage += std::format("{} ", tokens[i]);
                                 }
                                 else if (i == tokens.size() - 1) {
                                     endMessage += std::format("{}", tokens[i]);
                                 }
                             }
-                            endMessage += "\n";
                             reportWarning(endMessage);
                             break;
                         case InstructionType::COMPILETIMEERROR:
@@ -1023,14 +904,13 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             }
                             endMessage = "CompileTime Error: ";
                             for (uint16_t i = 0; i < tokens.size(); i++) {
-                                if (tokens[i] != "compileTimeError" && i != tokens.size() - 1) {
+                                if (tokens[i] != "#compileTimeError" && i != tokens.size() - 1) {
                                     endMessage += std::format("{} ", tokens[i]);
                                 }
                                 else if (i == tokens.size() - 1) {
                                     endMessage += std::format("{}", tokens[i]);
                                 }
                             }
-                            endMessage += "\n";
                             reportError(endMessage);
                             break;
                         case InstructionType::COMPILETIMEDEBUG:
@@ -1041,15 +921,123 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                             }
                             endMessage = "CompileTime Debug: ";
                             for (uint16_t i = 0; i < tokens.size(); i++) {
-                                if (tokens[i] != "compileTimeDebug" && i != tokens.size() - 1) {
+                                if (tokens[i] != "#compileTimeDebug" && i != tokens.size() - 1) {
                                     endMessage += std::format("{} ", tokens[i]);
                                 }
                                 else if (i == tokens.size() - 1) {
                                     endMessage += std::format("{}", tokens[i]);
                                 }
                             }
-                            endMessage += "\n";
                             reportDebug(endMessage);
+                            break;
+                        case InstructionType::MACRO:
+                            if (tokens.size() != 4 || tokens[2] != "is") {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (_definedMacroVariables.contains(tokens[1])) {
+                                reportError("Macro with the same name is already defined");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (doesTheVariableExist(tokens[3])) {
+                                reportError("Variable with the same name as the macro is already defined");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (doesTheFunctionExist(tokens[3])) {
+                                reportError("Function with the same name as the macro is already defined");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (!isANumber(tokens[3])) {
+                                reportError("Macro value is not a number");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            _definedMacroVariables[tokens[1]] = tokens[3];
+                            break;
+                        case InstructionType::COMPILETIMEIF:
+                            if (tokens.size() != 7 ||
+                                tokens[2] != "equals" ||
+                                tokens[3] != "to" ||
+                                tokens[5] != "then" ||
+                                tokens[6] != "do") {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (!doesTheMacroExist(tokens[1])) {
+                                reportError("Macro " + tokens[1] + " does not exist");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (!doesTheMacroExist(tokens[4])) {
+                                reportError("Macro " + tokens[4] + " does not exist");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (_definedMacroVariables[tokens[1]] != _definedMacroVariables[tokens[4]]) { _isSkippingCode = true; }
+                            _compileTimeIfStack.push_back(_conditionalCounter);
+                            _conditionalCounter++;
+                            break;
+                        case InstructionType::COMPILETIMEDONE:
+                            if (tokens.size() != 1) {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (_compileTimeIfStack.empty()) {
+                                reportError("'done' without a matching 'if' at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            _isSkippingCode = false;
+                            _compileTimeIfStack.pop_back();
+                            break;
+                        case InstructionType::MARK:
+                            if (tokens.size() != 2) {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (_isInAFunction) {
+                                reportError("'mark' is not allowed inside a function at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (_definedMarks.contains(tokens[1])) {
+                                reportError("Mark with the same name is already defined");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            assemblyInstruction = std::format(R"(
+{}:
+)", tokens[1]);
+                            _assemblyCode.addInstructionToText(assemblyInstruction);
+                            _definedMarks.insert(tokens[1]);
+                            break;
+                        case InstructionType::GOTO:
+                            if (tokens.size() != 3 || tokens[0] != "go" || tokens[1] != "to") {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (_isInAFunction) {
+                                reportError("'go to' is not allowed inside a function at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (!_definedMarks.contains(tokens[2])) {
+                                reportError("Mark " + tokens[2] + " does not exist");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            assemblyInstruction = std::format(R"(
+    jmp {}
+)", tokens[2]);
+                            _assemblyCode.addInstructionToText(assemblyInstruction);
                             break;
                         case InstructionType::INVALID:
                             reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
@@ -1061,6 +1049,112 @@ RESERVED_atoi_BY_LANGUAGE_positive:
                     _errorFlag = true;
                 }
             }
+            if (_needsBuffer) {
+                std::string bufferAssemblyCode = "buffer: .zero 33\n";
+                _assemblyCode.addInstructionToBss(bufferAssemblyCode);
+            }
+            if (_needsGetStringLength) {
+                std::string getStringLengthAssemblyCode = R"(
+RESERVED_get_string_BY_length_LANGUAGE:
+    xorq %rcx, %rcx
+RESERVED_get_string_BY_length_LANGUAGE_loop:
+    cmpb $0, (%rax)
+    je RESERVED_get_string_BY_length_LANGUAGE_done
+    incq %rcx
+    incq %rax
+    jmp RESERVED_get_string_BY_length_LANGUAGE_loop
+RESERVED_get_string_BY_length_LANGUAGE_done:
+    ret
+
+)";
+                _assemblyCode.addInstructionToFunctions(getStringLengthAssemblyCode);
+            }
+            if (_needsItoa) {
+                std::string itoaAssemblyCode = R"(
+RESERVED_itoa_BY_LANGUAGE:
+    testq %rax, %rax
+    jne RESERVED_itoa_BY_LANGUAGE_not_zero
+    movb $'0', buffer(%rip)
+    movb $0, buffer+1(%rip)
+    ret
+RESERVED_itoa_BY_LANGUAGE_not_zero:
+    movq %rax, %r8
+    xorq %r10, %r10
+    testq %r8, %r8
+    jns RESERVED_itoa_BY_LANGUAGE_count
+    negq %r8
+    movq $1, %r10
+RESERVED_itoa_BY_LANGUAGE_count:
+    movq %r8, %rax
+    xorq %r9, %r9
+RESERVED_itoa_BY_LANGUAGE_count_loop:
+    incq %r9
+    xorq %rdx, %rdx
+    movq $10, %rdi
+    divq %rdi
+    testq %rax, %rax
+    jnz RESERVED_itoa_BY_LANGUAGE_count_loop
+    leaq buffer(%rip), %rcx
+    cmpq $0, %r10
+    je RESERVED_itoa_BY_LANGUAGE_sign_done
+    movb $'-', (%rcx)
+    incq %rcx
+RESERVED_itoa_BY_LANGUAGE_sign_done:
+    addq %r9, %rcx
+    movb $0, (%rcx)
+    movq %r8, %rax
+RESERVED_itoa_BY_LANGUAGE_emit_loop:
+    decq %rcx
+    xorq %rdx, %rdx
+    movq $10, %rdi
+    divq %rdi
+    addb $'0', %dl
+    movb %dl, (%rcx)
+    testq %rax, %rax
+    jnz RESERVED_itoa_BY_LANGUAGE_emit_loop
+    ret
+
+)";
+                _assemblyCode.addInstructionToFunctions(itoaAssemblyCode);
+            }
+            if (_needsAtoi) {
+                std::string atoiAssemblyCode = R"(
+RESERVED_atoi_BY_LANGUAGE:
+    leaq buffer(%rip), %rsi
+    xorq %rax, %rax
+    xorq %r10, %r10
+    movb (%rsi), %cl
+    cmpb $'-', %cl
+    jne RESERVED_atoi_BY_LANGUAGE_loop
+    movq $1, %r10
+    incq %rsi
+RESERVED_atoi_BY_LANGUAGE_loop:
+    movzbq (%rsi), %rcx
+    cmpb $'0', %cl
+    jb RESERVED_atoi_BY_LANGUAGE_done
+    cmpb $'9', %cl
+    ja RESERVED_atoi_BY_LANGUAGE_done
+    subb $'0', %cl
+    imulq $10, %rax
+    addq %rcx, %rax
+    incq %rsi
+    jmp RESERVED_atoi_BY_LANGUAGE_loop
+RESERVED_atoi_BY_LANGUAGE_done:
+    cmpq $0, %r10
+    je RESERVED_atoi_BY_LANGUAGE_positive
+    negq %rax
+RESERVED_atoi_BY_LANGUAGE_positive:
+    ret
+
+)";
+                _assemblyCode.addInstructionToFunctions(atoiAssemblyCode);
+            }
+            if (_needsNewline) {
+                std::string newlineAssemblyCode = R"(
+    newline: .ascii "\n"
+)";
+                _assemblyCode.addInstructionToData(newlineAssemblyCode);
+            }
             if (!_conditionalMetadataStack.empty()) {
                 reportError("Unterminated 'if' block (missing 'done')");
                 _errorFlag = true;
@@ -1068,6 +1162,11 @@ RESERVED_atoi_BY_LANGUAGE_positive:
             }
             if (!_functionStack.empty()) {
                 reportError("Unterminated function (missing 'fdone')");
+                _errorFlag = true;
+                return;
+            }
+            if (!_compileTimeIfStack.empty()) {
+                reportError("Unterminated 'if' block (missing 'done')");
                 _errorFlag = true;
                 return;
             }
