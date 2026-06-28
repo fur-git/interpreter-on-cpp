@@ -37,8 +37,8 @@ source.txt  -->  compiler  -->  source.S  -->  as  -->  source.o  -->  ld  -->  
   `#compileTimeWarning`, `#compileTimeError`, `#compileTimeDebug`) are handled
   entirely during compilation. They emit no assembly.
 - **Marks and jumps** (`mark`, `go to`) let the main program jump to named
-  positions. Together with `if` / `done`, they are enough to build loops
-  manually.
+  positions. Together with `if` / `else do` / `done` (including `equals to`,
+  `is greater than`, and `is less than`), they are enough to build loops manually.
 - The program entry point is `_start`, and execution ends with the Linux
   `exit` syscall.
 
@@ -106,7 +106,9 @@ ignored. There are no comments.
 | `subtract` | `subtract Y from X` | `X = X - Y`. |
 | `multiply` | `multiply X by Y` | `X = X * Y`. |
 | `divide` | `divide X by Y` | `X = X / Y` (integer division). |
-| `if` | `if X equals to Y then do` | Run the block until `else do`/`done` only when `X == Y`. All keywords are required. |
+| `if` | `if X equals to Y then do` | Run the block until `else do`/`done` only when `X == Y`. |
+| `if` | `if X is greater than Y then do` | Run the block only when `X > Y`. |
+| `if` | `if X is less than Y then do` | Run the block only when `X < Y`. |
 | `else` | `else do` | Begin the block that runs only when the matching `if` condition was false. Optional. |
 | `done` | `done` | Close the most recently opened `if` block. |
 | `exit` | `exit X` | Terminate the program with exit code `X`. |
@@ -189,7 +191,7 @@ set element i from array data to be x
 set i to be 1
 
 mark eachElement
-if i equals to 4 then do
+if i is greater than 3 then do
     go to done
 done
 
@@ -203,8 +205,8 @@ go to eachElement
 mark done
 ```
 
-Because `if` only supports `equals to`, a counter variable (`i`) is the usual
-way to walk array indices in a loop.
+Use a counter variable (`i`) to walk array indices in a loop. Comparisons such as
+`if i is greater than N then do` work well for loop exit conditions.
 
 ### Arithmetic
 
@@ -315,11 +317,19 @@ with only the keyword (for example `info` alone) is a compile error.
 
 ### Conditionals
 
-A conditional starts with `if X equals to Y then do` and ends with `done`. Every
-keyword on the `if` line is **required** — the form is exactly seven tokens:
-`if`, left operand, `equals`, `to`, right operand, `then`, `do`. The block runs
-only when the two variables are equal; otherwise execution jumps past `done`.
-Conditionals can be **nested**.
+Runtime conditionals start with `if` and end with `done`. All keywords on the
+`if` line are **required**. Three comparison forms are supported:
+
+| Form | Runs when |
+| --- | --- |
+| `if X equals to Y then do` | `X == Y` |
+| `if X is greater than Y then do` | `X > Y` |
+| `if X is less than Y then do` | `X < Y` |
+
+`X` and `Y` must be existing variables. Conditionals can be **nested**. Each
+`if` may have at most one optional `else do` block.
+
+**Equals:**
 
 ```
 new left
@@ -329,6 +339,34 @@ set right to be 5
 
 if left equals to right then do
   print left
+  newline
+done
+```
+
+**Greater than:**
+
+```
+new a
+new b
+set a to be 10
+set b to be 3
+
+if a is greater than b then do
+  print a
+  newline
+done
+```
+
+**Less than:**
+
+```
+new a
+new b
+set a to be 2
+set b to be 7
+
+if a is less than b then do
+  print b
   newline
 done
 ```
@@ -391,7 +429,7 @@ newline
 go to loop
 ```
 
-**While-style loop** (`keep running while X equals Y`):
+**While-style loop** (`keep running while X is less than Y`):
 
 ```
 new X
@@ -402,7 +440,7 @@ set Y to be 5
 set one to be 1
 
 mark whileLoop
-if X equals to Y then do
+if X is greater than Y then do
     go to whileEnd
 done
 print X
@@ -410,9 +448,6 @@ add one into X
 go to whileLoop
 mark whileEnd
 ```
-
-Because `if` only supports `equals to`, richer comparisons still need workarounds
-until more operators are added.
 
 ### Macros and compile-time conditionals
 
@@ -528,13 +563,10 @@ if that code would not run at execution time.
 Each instruction requires at least one message word after the keyword, same as
 the runtime `info` / `warning` / `error` / `debug` instructions.
 
-**Important:** instruction detection uses keyword substring matching on the
-**entire line**. Because `#compileTime*` keywords are checked after many other
-keywords, a compile-time message that contains words like `new`, `set`, `add`,
-`done`, `if`, or `print` anywhere in the text can be misclassified as a
-different instruction. Keep checkpoint messages free of instruction keywords, or
-use neutral wording (for example `#compileTimeInfo checkpoint 2 ok` instead of
-`#compileTimeInfo checkpoint 2 after new x`).
+Instruction type is determined from the **first token** (or the first two tokens
+for `new array`, `get element`, `set element`, and `go to`). Message text in
+`info`, `warning`, `error`, `debug`, and `#compileTime*` lines is not parsed as
+instructions, so those messages can contain words like `new`, `set`, or `if`.
 
 ### Exiting
 
@@ -688,15 +720,12 @@ few sharp edges worth knowing:
   rather than searching the generated `.data` section as text. Short names that
   are substrings of other identifiers (for example `line` vs `newline`) no
   longer cause false "already exists" or "does not exist" errors.
-- **Instruction detection is keyword-substring-based.** Avoid variable and
-  function names that contain instruction keywords (`new`, `new array`, `set`,
-  `set element`, `get element`, `add`, `into`, `from`, `by`, `if`, `read`,
-  `printString`, `function`, `execute`, `fdone`, `nothing`, `mark`, `go to`,
-  `#macro`, `#compileTimeInfo`, `info`, `warning`, `error`, `debug`, etc.).
-  The compiler checks longer keywords such as `new array`, `get element`,
-  `set element`, and `#compileTimeInfo` before shorter ones like `new`, `set`,
-  `get`, and `info` that they contain. The same rule applies to text in
-  `#compileTime*` messages — see [Compile-time debugging](#compile-time-debugging).
+- **Instruction detection is token-based.** The compiler classifies a line from
+  its first token (or first two tokens for multi-word instructions such as
+  `new array`, `get element`, `set element`, and `go to`). Multi-word `if` forms
+  (`equals to`, `is greater than`, `is less than`) are recognized before the
+  plain `if` fallback. A line must still **start** with a valid instruction
+  keyword — arbitrary text is not a valid line.
 - **Arrays have a fixed compile-time size.** There is no heap, dynamic growth,
   or resize. Total memory (variables plus all array slots) is bounded when the
   program is compiled.
@@ -710,10 +739,9 @@ few sharp edges worth knowing:
   number per line) is the most predictable.
 - **No numeric validation.** Non-numeric input parses as `0` or stops at the
   first non-digit; very large values can overflow without warning.
-- **Only `equals to` is supported** as a comparison in runtime `if` and
-  compile-time `#if`.
-- **`if` lines must be exactly** `if X equals to Y then do` and may contain at
-  most one `else do` block.
+- **Runtime `if` supports three comparisons:** `equals to`, `is greater than`,
+  and `is less than`. Compile-time `#if` still supports only `equals to`.
+- **Each `if` may have at most one `else do` block**, closed with `done`.
 - **`mark` and `go to` are main-program only.** They cannot appear inside
   function bodies. Jumping into or out of a function would break the call/return
   stack, so the compiler rejects them there.

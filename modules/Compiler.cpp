@@ -8,6 +8,7 @@
 #include <sstream>
 #include <format>
 #include <cstdlib>
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -24,7 +25,9 @@ class Compiler {
             NEWLINE,
             EXIT,
             DONE,
-            IF,
+            IFEQUAL,
+            IFGREATER,
+            IFLESS,
             ELSE,
             READ,
             INVALID,
@@ -82,41 +85,68 @@ class Compiler {
         std::set<std::string> _definedFunctions;
         std::set<std::string> _definedVariables;
         std::set<std::string> _definedMarks;
-        InstructionType getInstructionType(const std::string& instruction) {
-            if (instruction.find("#macro") != std::string::npos) return InstructionType::MACRO;
-            if (instruction.find("#compileTimeInfo") != std::string::npos) return InstructionType::COMPILETIMEINFO;
-            if (instruction.find("#compileTimeWarning") != std::string::npos) return InstructionType::COMPILETIMEWARNING;
-            if (instruction.find("#compileTimeError") != std::string::npos) return InstructionType::COMPILETIMEERROR;
-            if (instruction.find("#compileTimeDebug") != std::string::npos) return InstructionType::COMPILETIMEDEBUG;
-            if (instruction.find("info") != std::string::npos) return InstructionType::INFO;
-            if (instruction.find("warning") != std::string::npos) return InstructionType::WARNING;
-            if (instruction.find("error") != std::string::npos) return InstructionType::ERROR;
-            if (instruction.find("debug") != std::string::npos) return InstructionType::DEBUG;
-            if (instruction.find("#if") != std::string::npos) return InstructionType::COMPILETIMEIF;
-            if (instruction.find("#done") != std::string::npos) return InstructionType::COMPILETIMEDONE;
-            if (instruction.find("function") != std::string::npos) return InstructionType::FUNCTION;
-            if (instruction.find("fdone") != std::string::npos) return InstructionType::FDONE;
-            if (instruction.find("execute") != std::string::npos) return InstructionType::EXECUTE;
-            if (instruction.find("printString") != std::string::npos) return InstructionType::PRINTSTRING;
-            if (instruction.find("print") != std::string::npos) return InstructionType::PRINT;
-            if (instruction.find("newline") != std::string::npos) return InstructionType::NEWLINE;
-            if (instruction.find("new array") != std::string::npos) return InstructionType::NEWARRAY;
-            if (instruction.find("get element") != std::string::npos) return InstructionType::GETELEMENT;
-            if (instruction.find("set element") != std::string::npos) return InstructionType::SETELEMENT;
-            if (instruction.find("new") != std::string::npos) return InstructionType::NEW;
-            if (instruction.find("set") != std::string::npos) return InstructionType::SET;
-            if (instruction.find("add") != std::string::npos) return InstructionType::ADD;
-            if (instruction.find("subtract") != std::string::npos) return InstructionType::SUBTRACT;
-            if (instruction.find("multiply") != std::string::npos) return InstructionType::MULTIPLY;
-            if (instruction.find("divide") != std::string::npos) return InstructionType::DIVIDE;
-            if (instruction.find("exit") != std::string::npos) return InstructionType::EXIT;
-            if (instruction.find("done") != std::string::npos) return InstructionType::DONE;
-            if (instruction.find("else") != std::string::npos) return InstructionType::ELSE;
-            if (instruction.find("if") != std::string::npos) return InstructionType::IF;
-            if (instruction.find("read") != std::string::npos) return InstructionType::READ;
-            if (instruction.find("nothing") != std::string::npos) return InstructionType::NOTHING;
-            if (instruction.find("mark") != std::string::npos) return InstructionType::MARK;
-            if (instruction.find("go to") != std::string::npos) return InstructionType::GOTO;
+        InstructionType getInstructionType(const std::vector<std::string>& tokensVector) {
+            if (tokensVector.empty()) return InstructionType::INVALID;
+            if (tokensVector[0] == "new" &&
+                tokensVector.size() >= 2 &&
+                tokensVector[1] == "array") {
+                return InstructionType::NEWARRAY;
+            }
+            if (tokensVector[0] == "get" &&
+                tokensVector.size() >= 2 &&
+                tokensVector[1] == "element") {
+                return InstructionType::GETELEMENT;
+            }
+            if (tokensVector[0] == "set" &&
+                tokensVector.size() >= 2 &&
+                tokensVector[1] == "element") {
+                return InstructionType::SETELEMENT;
+            }
+            if (tokensVector[0] == "go" &&
+                tokensVector.size() >= 2 &&
+                tokensVector[1] == "to") {
+                return InstructionType::GOTO;
+            }
+            if (tokensVector[0] == "if" &&
+                tokensVector.size() >= 4 &&
+                tokensVector[3] == "greater") {
+                return InstructionType::IFGREATER;
+            }
+            if (tokensVector[0] == "if" &&
+                tokensVector.size() >= 4 &&
+                tokensVector[3] == "less") {
+                return InstructionType::IFLESS;
+            }
+            if (tokensVector[0] == "#macro") return InstructionType::MACRO;
+            if (tokensVector[0] == "#compileTimeInfo") return InstructionType::COMPILETIMEINFO;
+            if (tokensVector[0] == "#compileTimeWarning") return InstructionType::COMPILETIMEWARNING;
+            if (tokensVector[0] == "#compileTimeError") return InstructionType::COMPILETIMEERROR;
+            if (tokensVector[0] == "#compileTimeDebug") return InstructionType::COMPILETIMEDEBUG;
+            if (tokensVector[0] == "info") return InstructionType::INFO;
+            if (tokensVector[0] == "warning") return InstructionType::WARNING;
+            if (tokensVector[0] == "error") return InstructionType::ERROR;
+            if (tokensVector[0] == "debug") return InstructionType::DEBUG;
+            if (tokensVector[0] == "#if") return InstructionType::COMPILETIMEIF;
+            if (tokensVector[0] == "#done") return InstructionType::COMPILETIMEDONE;
+            if (tokensVector[0] == "function") return InstructionType::FUNCTION;
+            if (tokensVector[0] == "fdone") return InstructionType::FDONE;
+            if (tokensVector[0] == "execute") return InstructionType::EXECUTE;
+            if (tokensVector[0] == "printString") return InstructionType::PRINTSTRING;
+            if (tokensVector[0] == "print") return InstructionType::PRINT;
+            if (tokensVector[0] == "newline") return InstructionType::NEWLINE;
+            if (tokensVector[0] == "new") return InstructionType::NEW;
+            if (tokensVector[0] == "set") return InstructionType::SET;
+            if (tokensVector[0] == "add") return InstructionType::ADD;
+            if (tokensVector[0] == "subtract") return InstructionType::SUBTRACT;
+            if (tokensVector[0] == "multiply") return InstructionType::MULTIPLY;
+            if (tokensVector[0] == "divide") return InstructionType::DIVIDE;
+            if (tokensVector[0] == "exit") return InstructionType::EXIT;
+            if (tokensVector[0] == "done") return InstructionType::DONE;
+            if (tokensVector[0] == "else") return InstructionType::ELSE;
+            if (tokensVector[0] == "if") return InstructionType::IFEQUAL;
+            if (tokensVector[0] == "read") return InstructionType::READ;
+            if (tokensVector[0] == "nothing") return InstructionType::NOTHING;
+            if (tokensVector[0] == "mark") return InstructionType::MARK;
             return InstructionType::INVALID;
         }
         bool doesTheArrayExist(const std::string& arrayName) {
@@ -203,13 +233,13 @@ class Compiler {
                 lineNumber++;
                 if (_errorFlag) { return; }
                 if (line.empty()) { continue; }
-                InstructionType instructionType = getInstructionType(line);
-                if (_isSkippingCode && instructionType != InstructionType::COMPILETIMEDONE) { continue; }
                 std::vector<std::string> tokens;
                 std::stringstream ss(line);
                 std::string token;
                 std::string variableName;
                 while (ss >> token) { tokens.push_back(token); }
+                InstructionType instructionType = getInstructionType(tokens);
+                if (_isSkippingCode && instructionType != InstructionType::COMPILETIMEDONE) { continue; }
                 try {
                     std::string assemblyInstruction;
                     std::string endMessage;
@@ -511,7 +541,7 @@ class Compiler {
                                 _assemblyCode.addInstructionToText(assemblyInstruction);
                             }
                             break;
-                        case InstructionType::IF:
+                        case InstructionType::IFEQUAL:
                             if (tokens.size() != 7 ||
                             tokens[2] != "equals" ||
                             tokens[3] != "to" ||
@@ -544,6 +574,90 @@ class Compiler {
     cmpl {}(%rip), %eax
     jne .Lelse_{}
 )", tokens[1], tokens[4], _labelCounter);
+                            }
+                            if (_isInAFunction) {
+                                _assemblyCode.addInstructionToFunctions(assemblyInstruction);
+                            } else {
+                                _assemblyCode.addInstructionToText(assemblyInstruction);
+                            }
+                            _labelCounter++;
+                            break;
+                        case InstructionType::IFGREATER:
+                            if (tokens.size() != 8 ||
+                            tokens[2] != "is" ||
+                            tokens[3] != "greater" ||
+                            tokens[4] != "than" ||
+                            tokens[6] != "then" ||
+                            tokens[7] != "do") {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (!doesTheVariableExist(tokens[1])) {
+                                reportError("Variable " + tokens[1] + " does not exist");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (!doesTheVariableExist(tokens[5])) {
+                                reportError("Variable " + tokens[5] + " does not exist");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            _conditionalMetadataStack.push_back({_labelCounter, false});
+                            if (_is64Bits) {
+                                assemblyInstruction = std::format(R"(
+    movq {}(%rip), %rax
+    cmpq {}(%rip), %rax
+    jle .Lelse_{}
+)", tokens[1], tokens[5], _labelCounter);
+                            } else {
+                                assemblyInstruction = std::format(R"(
+    movl {}(%rip), %eax
+    cmpl {}(%rip), %eax
+    jle .Lelse_{}
+)", tokens[1], tokens[5], _labelCounter);
+                            }
+                            if (_isInAFunction) {
+                                _assemblyCode.addInstructionToFunctions(assemblyInstruction);
+                            } else {
+                                _assemblyCode.addInstructionToText(assemblyInstruction);
+                            }
+                            _labelCounter++;
+                            break;
+                        case InstructionType::IFLESS:
+                            if (tokens.size() != 8 ||
+                            tokens[2] != "is" ||
+                            tokens[3] != "less" ||
+                            tokens[4] != "than" ||
+                            tokens[6] != "then" ||
+                            tokens[7] != "do") {
+                                reportError("Invalid instruction: " + line + " at line " + std::to_string(lineNumber));
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (!doesTheVariableExist(tokens[1])) {
+                                reportError("Variable " + tokens[1] + " does not exist");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            if (!doesTheVariableExist(tokens[5])) {
+                                reportError("Variable " + tokens[5] + " does not exist");
+                                _errorFlag = true;
+                                continue;
+                            }
+                            _conditionalMetadataStack.push_back({_labelCounter, false});
+                            if (_is64Bits) {
+                                assemblyInstruction = std::format(R"(
+    movq {}(%rip), %rax
+    cmpq {}(%rip), %rax
+    jge .Lelse_{}
+)", tokens[1], tokens[5], _labelCounter);
+                            } else {
+                                assemblyInstruction = std::format(R"(
+    movl {}(%rip), %eax
+    cmpl {}(%rip), %eax
+    jge .Lelse_{}
+)", tokens[1], tokens[5], _labelCounter);
                             }
                             if (_isInAFunction) {
                                 _assemblyCode.addInstructionToFunctions(assemblyInstruction);
